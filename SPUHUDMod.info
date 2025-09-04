@@ -1,0 +1,11 @@
+{
+    "_name": "SPUHUDMod",
+    "_author": "USER",
+    "_description": "SPU HUD Display for Sensor Lenses",
+    "_version": "1.0.0",
+    "_unityVersion": "2021.2.13f1",
+    "_platforms": 1,
+    "_content": 0,
+    "_contentTypes": -1,
+    "_isEnabled": false
+}
