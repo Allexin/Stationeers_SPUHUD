@@ -69,7 +69,7 @@ namespace spuhudmod
         {
             if (hudCanvas == null) return;
 
-            int fontSize = SPUHUDMod.FontSize?.Value ?? 18;
+            int fontSize = SPUHUDMod.FontSize?.Value ?? 40;
             int lineHeight = fontSize + 4;
 
             var textGO = new GameObject($"SPUHUD_Line_{index}");
@@ -78,7 +78,7 @@ namespace spuhudmod
             var text = textGO.AddComponent<UnityEngine.UI.Text>();
             text.color = ParseColor(SPUHUDMod.TextColor?.Value ?? "yellow");
             text.fontSize = fontSize;
-            text.font = Resources.GetBuiltinResource<Font>("rocketstation_Data\\StreamingAssets\\Fonts\\3270-Regular.ttf");
+            text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
             text.fontStyle = FontStyle.Bold;
             text.alignment = TextAnchor.UpperLeft;
             

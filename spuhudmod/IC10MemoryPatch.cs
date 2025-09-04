@@ -89,8 +89,7 @@ namespace spuhudmod
                 if (circuitHousing == null)
                     return true;
                 
-                var device = circuitHousing.GetLogicableFromIndex(devIndex);
-                UnityEngine.Debug.Log($"SPUHUD: Found device at index {devIndex}: {device?.DisplayName ?? "null"} (Type: {device?.GetType().Name ?? "null"})");
+                var device = circuitHousing.GetLogicableFromIndex(devIndex);                
                 
                 // Check if it's a LogicTransmitter in passive mode
                 if (device is LogicTransmitter transmitter && !transmitter.IsActiveTransmitter)
