@@ -16,11 +16,70 @@ using System.Text;
 
 namespace spuhudmod
 {
+    // HUD formatting codes
+    public enum HUDFormatCode
+    {
+        Float2Decimal = 0,      // float с выводом двух цифр после запятой
+        Integer = 1,            // округление до целого
+        NormalizedPercent = 2,  // 0.0-1.0 -> 0%-100%
+        Percent = 3,            // процент с двумя цифрами после запятой
+        Kelvin = 4,             // градусы в кельвинах с °К
+        Celsius = 5,            // градусы в цельсии с °С
+        CelsiusFromKelvin = 6,  // конвертация из кельвинов в цельсии
+        Pressure = 7,           // давление в Pa/kPa/MPa
+        Liters = 8              // литры с суффиксом L
+    }
+
+    // HUD color codes
+    public static class HUDColors
+    {
+        public static readonly Color[] Colors = {
+            new Color(0x21/255f, 0x2A/255f, 0xA5/255f), // 0 Blue
+            new Color(0x7B/255f, 0x7B/255f, 0x7B/255f), // 1 Gray
+            new Color(0x3F/255f, 0x9B/255f, 0x39/255f), // 2 Green
+            new Color(0xFF/255f, 0x66/255f, 0x2B/255f), // 3 Orange
+            new Color(0xE7/255f, 0x02/255f, 0x00/255f), // 4 Red
+            new Color(0xFF/255f, 0xBC/255f, 0x1B/255f), // 5 Yellow
+            new Color(0xE7/255f, 0xE7/255f, 0xE7/255f), // 6 White
+            new Color(0x08/255f, 0x09/255f, 0x08/255f), // 7 Black
+            new Color(0x63/255f, 0x3C/255f, 0x2B/255f), // 8 Brown
+            new Color(0x63/255f, 0x63/255f, 0x3F/255f), // 9 Khaki
+            new Color(0xE4/255f, 0x1C/255f, 0x99/255f), // 10 Pink
+            new Color(0x73/255f, 0x2C/255f, 0xA7/255f)  // 11 Purple
+        };
+        
+        public static Color GetColor(int colorCode)
+        {
+            if (colorCode < 0 || colorCode >= Colors.Length)
+                return Colors[11]; // Purple as default
+            return Colors[colorCode];
+        }
+    }
+
+    // HUD data structure for memory cells
+    public struct HUDMemoryData
+    {
+        public double Value;        // 0 - значение
+        public double ShowFlag;     // 1 - флаг отображения
+        public double Format;       // 2 - форматирование
+        public double Color;        // 3 - цвет
+        // 4-9 reserved
+        
+        public bool ShouldShow => Math.Abs(ShowFlag) > 0.001;
+        public int FormatCode => Math.Max(0, Math.Min(8, (int)Math.Round(Format)));
+        public int ColorCode => Math.Max(0, Math.Min(11, (int)Math.Round(Color)));
+    }
+
     // HUD Manager component that gets attached to SensorLenses GameObject
     public class HUDManager : MonoBehaviour
     {
         public GameObject hudCanvas;
         public List<UnityEngine.UI.Text> hudTextComponents = new List<UnityEngine.UI.Text>();
+        
+
+        
+        // Cache for previous frame data to avoid unnecessary UI updates
+        private List<(string text, Color color)> _previousHudData = new List<(string text, Color color)>();
         
         public void CreateHUDCanvas()
         {
@@ -34,14 +93,17 @@ namespace spuhudmod
             // Don't add CanvasScaler to avoid font size inconsistencies
         }
         
-        public void UpdateHUDLines(string[] lines)
+        public void UpdateHUDLines(List<(string text, Color color)> hudData)
         {
-            if (lines == null || lines.Length == 0) return;
+            if (hudData == null || hudData.Count == 0) return;
+            
+            // Check if data has changed to avoid unnecessary UI updates
+            if (HudDataEquals(hudData, _previousHudData)) return;
             
             if (hudCanvas == null) CreateHUDCanvas();
             
             // Update text components or create if needed
-            for (int i = 0; i < lines.Length; i++)
+            for (int i = 0; i < hudData.Count; i++)
             {
                 if (i >= hudTextComponents.Count)
                 {
@@ -50,19 +112,37 @@ namespace spuhudmod
                 
                 if (i < hudTextComponents.Count && hudTextComponents[i] != null)
                 {
-                    hudTextComponents[i].text = lines[i];
+                    hudTextComponents[i].text = hudData[i].text;
+                    hudTextComponents[i].color = hudData[i].color;
                     hudTextComponents[i].gameObject.SetActive(true);
                 }
             }
 
             // Hide extra text components
-            for (int i = lines.Length; i < hudTextComponents.Count; i++)
+            for (int i = hudData.Count; i < hudTextComponents.Count; i++)
             {
                 if (hudTextComponents[i] != null)
                 {
                     hudTextComponents[i].gameObject.SetActive(false);
                 }
             }
+            
+            // Cache current data for next frame comparison
+            _previousHudData.Clear();
+            _previousHudData.AddRange(hudData);
+        }
+        
+        private bool HudDataEquals(List<(string text, Color color)> data1, List<(string text, Color color)> data2)
+        {
+            if (data1.Count != data2.Count) return false;
+            
+            for (int i = 0; i < data1.Count; i++)
+            {
+                if (data1[i].text != data2[i].text || data1[i].color != data2[i].color)
+                    return false;
+            }
+            
+            return true;
         }
         
         private void CreateTextComponent(int index)
@@ -144,6 +224,8 @@ namespace spuhudmod
     [HarmonyPatch]
     public class SensorLensesPatch
     {
+        // Cached list to avoid allocations every frame
+        private static List<(string text, Color color)> _cachedHudDataList = new List<(string text, Color color)>();
                 [HarmonyPatch(typeof(SensorLenses), "UpdateEachFrame")]
         [HarmonyPostfix]
         public static void ShowHUDText(SensorLenses __instance)
@@ -165,8 +247,8 @@ namespace spuhudmod
 
             if (shouldShowHUD)
             {
-                string[] dynamicHUDLines = GetSuitChipData(InventoryManager.ParentHuman);
-                hudManager.UpdateHUDLines(dynamicHUDLines);
+                var dynamicHUDData = GetSuitChipData(InventoryManager.ParentHuman);
+                hudManager.UpdateHUDLines(dynamicHUDData);
                 hudManager.ShowHUD();
             }
             else
@@ -175,9 +257,11 @@ namespace spuhudmod
             }
         }
         
-        private static string[] GetSuitChipData(Human human)
+        private static List<(string text, Color color)> GetSuitChipData(Human human)
         {
-            var hudLinesList = new List<string>();
+            // Clear and reuse cached list to avoid allocations
+            _cachedHudDataList.Clear();
+            var hudDataList = _cachedHudDataList;
             
             try
             {
@@ -185,8 +269,8 @@ namespace spuhudmod
                 var suitSlot = human.SuitSlot;
                 if (suitSlot == null)
                 {
-                    hudLinesList.Add("HUD Disabled: No suit slot");
-                    return hudLinesList.ToArray();
+                    hudDataList.Add(("HUD Disabled: No suit slot", Color.red));
+                    return hudDataList;
                 }
                 
                 // Check for different suit types and get chip slot
@@ -204,97 +288,106 @@ namespace spuhudmod
                 }
                 else if (!suitSlot.IsEmpty())
                 {
-                    hudLinesList.Add("HUD Disabled: Wrong suit type");
-                    return hudLinesList.ToArray();
+                    hudDataList.Add(("HUD Disabled: Wrong suit type", Color.red));
+                    return hudDataList;
                 }
                 else
                 {
-                    hudLinesList.Add("HUD Disabled: No suit");
-                    return hudLinesList.ToArray();
+                    hudDataList.Add(("HUD Disabled: No suit", Color.red));
+                    return hudDataList;
                 }
                 
                 if (chipSlot == null)
                 {
-                    hudLinesList.Add("HUD Disabled: No chip slot");
-                    return hudLinesList.ToArray();
+                    hudDataList.Add(("HUD Disabled: No chip slot", Color.red));
+                    return hudDataList;
                 }
                 
                 var chip = chipSlot.Get<ProgrammableChip>();
                 if (chip == null)
                 {
-                    hudLinesList.Add("HUD Disabled: No chip");
-                    return hudLinesList.ToArray();
+                    hudDataList.Add(("HUD Disabled: No chip", Color.red));
+                    return hudDataList;
                 }
                 
-                // All conditions met - chip is available
-                hudLinesList.Add("HUD: Active");
+                // Get defines and memory using reflection
+                var definesField = typeof(ProgrammableChip).GetField("_Defines", BindingFlags.NonPublic | BindingFlags.Instance);
+                var stackField = typeof(ProgrammableChip).GetField("_Stack", BindingFlags.NonPublic | BindingFlags.Instance);
                 
-                // Get aliases and registers using reflection
-                var aliasesField = typeof(ProgrammableChip).GetField("_Aliases", BindingFlags.NonPublic | BindingFlags.Instance);
-                var registersField = typeof(ProgrammableChip).GetField("_Registers", BindingFlags.NonPublic | BindingFlags.Instance);
-                
-                if (aliasesField != null && registersField != null)
+                if (definesField != null && stackField != null)
                 {
-                    var aliases = aliasesField.GetValue(chip);
-                    var registers = (double[])registersField.GetValue(chip);
+                    var defines = definesField.GetValue(chip);
+                    var memory = (double[])stackField.GetValue(chip);
                     
-                    if (aliases != null && registers != null)
+                    if (defines != null && memory != null)
                     {
-                        // Process HUD aliases
-                        ProcessHUDAliases(aliases, registers, hudLinesList);
+                        // Add status line
+                        hudDataList.Add(("HUD: Active", Color.white));
+                        
+                        // Process HUD defines
+                        ProcessHUDDefines(defines, memory, hudDataList);
                     }
+                    else
+                    {
+                        hudDataList.Add(("HUD Error: No defines or memory", Color.red));
+                    }
+                }
+                else
+                {
+                    hudDataList.Add(("HUD Error: Cannot access defines/memory", Color.red));
                 }
                 
             }
             catch (System.Exception ex)
             {
-                hudLinesList.Clear();
-                hudLinesList.Add($"HUD Error: {ex.Message}");
+                hudDataList.Clear();
+                hudDataList.Add(($"HUD Error: {ex.Message}", Color.red));
                 Debug.LogError($"SPUHUD: Error reading chip data: {ex.Message}");
             }
             
-            return hudLinesList.ToArray();
+            return hudDataList;
         }
         
-        private static void ProcessHUDAliases(object aliases, double[] registers, List<string> hudLinesList)
+        private static void ProcessHUDDefines(object defines, double[] memory, List<(string text, Color color)> hudDataList)
         {
             try
             {
-                // aliases is Dictionary<string, _AliasValue> but _AliasValue is private
-                // We need to use reflection to iterate through it
-                var aliasesDict = aliases as System.Collections.IDictionary;
-                if (aliasesDict == null) return;
+                // defines is Dictionary<string, double> 
+                var definesDict = defines as System.Collections.IDictionary;
+                if (definesDict == null) return;
 
-                const double INACTIVE_VALUE = -500.0;
-                const double EPSILON = 0.00001;
-
-                foreach (System.Collections.DictionaryEntry entry in aliasesDict)
+                foreach (System.Collections.DictionaryEntry entry in definesDict)
                 {
-                    string aliasKey = entry.Key as string;
-                    if (aliasKey != null && aliasKey.StartsWith("HUD"))
+                    string defineKey = entry.Key as string;
+                    if (defineKey != null && defineKey.StartsWith("HUD"))
                     {
-                        // Get _AliasValue using reflection
-                        var aliasValue = entry.Value;
-                        var targetField = aliasValue.GetType().GetField("Target");
-                        var indexField = aliasValue.GetType().GetField("Index");
+                        double memoryAddress = (double)entry.Value;
+                        int baseAddress = (int)Math.Round(memoryAddress);
                         
-                        if (targetField != null && indexField != null)
+                        // Check if we have enough memory cells (need 10 cells: 0-9)
+                        if (baseAddress >= 0 && baseAddress + 9 < memory.Length)
                         {
-                            int target = (int)targetField.GetValue(aliasValue);
-                            int index = (int)indexField.GetValue(aliasValue);
-                            
-                            // Check if it's a register alias (Target == 1 for Register)
-                            if (target == 1 && index >= 0 && index < registers.Length)
+                            var hudData = new HUDMemoryData
                             {
-                                double value = registers[index];
+                                Value = memory[baseAddress + 0],
+                                ShowFlag = memory[baseAddress + 1],
+                                Format = memory[baseAddress + 2],
+                                Color = memory[baseAddress + 3]
+                            };
+                            
+                            // Check if this line should be displayed
+                            if (hudData.ShouldShow)
+                            {
+                                // Format the value according to format code
+                                string formattedValue = FormatValue(hudData.Value, (HUDFormatCode)hudData.FormatCode);
                                 
-                                // Check if value is not the inactive marker
-                                if (Math.Abs(value - INACTIVE_VALUE) > EPSILON)
-                                {
-                                    // Remove "HUD" prefix and format display key
-                                    string displayKey = FormatAliasKey(aliasKey.Substring(3)); // Remove "HUD"
-                                    hudLinesList.Add($"{displayKey}: {value:F2}");
-                                }
+                                // Get color
+                                Color lineColor = HUDColors.GetColor(hudData.ColorCode);
+                                
+                                // Remove "HUD" prefix and format display key
+                                string displayKey = FormatDefineKey(defineKey.Substring(3)); // Remove "HUD"
+                                
+                                hudDataList.Add(($"{displayKey}: {formattedValue}", lineColor));
                             }
                         }
                     }
@@ -302,29 +395,72 @@ namespace spuhudmod
             }
             catch (System.Exception ex)
             {
-                hudLinesList.Add($"Alias Error: {ex.Message}");
-                Debug.LogError($"SPUHUD: Error processing aliases: {ex.Message}");
+                hudDataList.Add(($"Define Error: {ex.Message}", Color.red));
+                Debug.LogError($"SPUHUD: Error processing defines: {ex.Message}");
             }
         }
         
-        private static string FormatAliasKey(string aliasKey)
+        private static string FormatValue(double value, HUDFormatCode formatCode)
         {
-            if (string.IsNullOrEmpty(aliasKey))
-                return aliasKey;
+            switch (formatCode)
+            {
+                case HUDFormatCode.Float2Decimal:
+                    return value.ToString("F2");
+                    
+                case HUDFormatCode.Integer:
+                    return Math.Round(value).ToString("F0");
+                    
+                case HUDFormatCode.NormalizedPercent:
+                    return (value * 100).ToString("F0") + "%";
+                    
+                case HUDFormatCode.Percent:
+                    return value.ToString("F2") + "%";
+                    
+                case HUDFormatCode.Kelvin:
+                    return value.ToString("F2") + "°K";
+                    
+                case HUDFormatCode.Celsius:
+                    return value.ToString("F2") + "°C";
+                    
+                case HUDFormatCode.CelsiusFromKelvin:
+                    return (value - 273.15).ToString("F2") + "°C";
+                    
+                case HUDFormatCode.Pressure:
+                    if (value < 1)
+                        return (value * 1000).ToString("F0") + "Pa";
+                    else if (value < 1000)
+                        return value.ToString("F2") + "kPa";
+                    else if (value < 10000)
+                        return value.ToString("F0") + "kPa";
+                    else
+                        return (value / 1000).ToString("F2") + "MPa";
+                        
+                case HUDFormatCode.Liters:
+                    return Math.Round(value).ToString("F0") + "L";
+                    
+                default:
+                    return value.ToString("F2");
+            }
+        }
+        
+        private static string FormatDefineKey(string defineKey)
+        {
+            if (string.IsNullOrEmpty(defineKey))
+                return defineKey;
             
             var result = new StringBuilder();
             
             // Add first character as-is
-            result.Append(aliasKey[0]);
+            result.Append(defineKey[0]);
             
             // Add spaces before uppercase letters (except the first character)
-            for (int i = 1; i < aliasKey.Length; i++)
+            for (int i = 1; i < defineKey.Length; i++)
             {
-                if (char.IsUpper(aliasKey[i]))
+                if (char.IsUpper(defineKey[i]))
                 {
                     result.Append(' ');
                 }
-                result.Append(aliasKey[i]);
+                result.Append(defineKey[i]);
             }
             
             return result.ToString();
