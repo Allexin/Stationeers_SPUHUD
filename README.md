@@ -88,6 +88,7 @@ Each HUD item uses 10 consecutive memory cells:
 - **6**: Kelvin to Celsius conversion (25.00°C)
 - **7**: Pressure Pa/kPa/MPa auto-scaling
 - **8**: Integer with L suffix (25L)
+- **9**: Do not show value - only key
 
 ### Color Codes
 - **0**: Blue, **1**: Gray, **2**: Green, **3**: Orange

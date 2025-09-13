@@ -27,7 +27,8 @@ namespace spuhudmod
         Celsius = 5,            // градусы в цельсии с °С
         CelsiusFromKelvin = 6,  // конвертация из кельвинов в цельсии
         Pressure = 7,           // давление в Pa/kPa/MPa
-        Liters = 8              // литры с суффиксом L
+        Liters = 8,              // литры с суффиксом L
+		TextOnly = 9			//Не показывает значение, только сам ключ	
     }
 
     // HUD color codes
@@ -66,7 +67,7 @@ namespace spuhudmod
         // 4-9 reserved
         
         public bool ShouldShow => Math.Abs(ShowFlag) > 0.001;
-        public int FormatCode => Math.Max(0, Math.Min(8, (int)Math.Round(Format)));
+        public int FormatCode => Math.Max(0, Math.Min(9, (int)Math.Round(Format)));
         public int ColorCode => Math.Max(0, Math.Min(11, (int)Math.Round(Color)));
     }
 
@@ -437,6 +438,9 @@ namespace spuhudmod
                         
                 case HUDFormatCode.Liters:
                     return Math.Round(value).ToString("F0") + "L";
+					
+				case HUDFormatCode.TextOnly:
+                    return "";
                     
                 default:
                     return value.ToString("F2");

@@ -2,7 +2,7 @@
 <ModMetadata xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <Name>SPU HUD Mod</Name>
   <Author>@!!ex</Author>
-  <Version>1.000000.001</Version>
+  <Version>1.000000.002</Version>
   <Description>Displays programmable HUD information from IC10 chip memory through sensor lenses and enhances Logic Transmitter functionality.
 
 FEATURES:
@@ -70,6 +70,7 @@ FORMAT CODES:
 6: Kelvin to Celsius conversion (25.00°C)
 7: Pressure Pa/kPa/MPa auto-scaling
 8: Integer with L suffix (25L)
+9: Show only key name, without value
 
 COLOR CODES:
 0=Blue, 1=Gray, 2=Green, 3=Orange, 4=Red, 5=Yellow, 6=White, 7=Black, 8=Brown, 9=Khaki, 10=Pink, 11=Purple
