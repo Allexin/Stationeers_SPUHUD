@@ -22,74 +22,38 @@ namespace spuhudmod
             {
                 var type = instance.GetType();
                 
-                // Get the chip and device index
-                var chipField = type.BaseType.GetField("_Chip", BindingFlags.NonPublic | BindingFlags.Instance);
-                var deviceIndexField = type.GetField("_DeviceIndex", BindingFlags.NonPublic | BindingFlags.Instance);
+                // Get the chip and device reference (new structure in updated game)
+                var chipField = type.GetField("_Chip", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (chipField == null)
+                {
+                    // Try in base type if not found in current type
+                    chipField = type.BaseType?.GetField("_Chip", BindingFlags.NonPublic | BindingFlags.Instance);
+                }
                 
-                if (chipField == null || deviceIndexField == null)
+                var deviceRefField = type.GetField("_DeviceRef", BindingFlags.NonPublic | BindingFlags.Instance);
+                
+                if (chipField == null || deviceRefField == null)
                     return true;
                 
                 var chip = (ProgrammableChip)chipField.GetValue(instance);
-                var deviceIndexVar = deviceIndexField.GetValue(instance);
+                var deviceRef = deviceRefField.GetValue(instance);
                 
-                // Get device index using alias
-                var aliasField = deviceIndexVar.GetType().GetField("_Alias", BindingFlags.NonPublic | BindingFlags.Instance);
-                var deviceIndexField2 = deviceIndexVar.GetType().GetField("_DeviceIndex", BindingFlags.NonPublic | BindingFlags.Instance);
-                
-                string alias = aliasField?.GetValue(deviceIndexVar) as string;
-                int directIndex = (int)(deviceIndexField2?.GetValue(deviceIndexVar) ?? -1);
-                
-                int devIndex;
-                if (!string.IsNullOrEmpty(alias))
-                {
-                    // Check if it's a direct device reference like d0, d1, d5 etc.
-                    if (alias.StartsWith("d") && directIndex >= 0)
-                    {
-                        devIndex = directIndex;
-                    }
-                    else
-                    {
-                        // Find device by alias
-                        var aliasesField = typeof(ProgrammableChip).GetField("_Aliases", BindingFlags.NonPublic | BindingFlags.Instance);
-                        var aliases = aliasesField?.GetValue(chip) as System.Collections.IDictionary;
-                        
-                        if (aliases != null && aliases.Contains(alias))
-                        {
-                            var aliasValue = aliases[alias];
-                            var targetField = aliasValue.GetType().GetField("Target", BindingFlags.Public | BindingFlags.Instance);
-                            var indexField = aliasValue.GetType().GetField("Index", BindingFlags.Public | BindingFlags.Instance);
-                            
-                            if (targetField != null && indexField != null)
-                            {
-                                var target = targetField.GetValue(aliasValue);
-                                devIndex = (int)indexField.GetValue(aliasValue);
-                            }
-                            else
-                            {
-                                return true;
-                            }
-                        }
-                        else
-                        {
-                            return true;
-                        }
-                    }
-                }
-                else if (directIndex >= 0)
-                {
-                    devIndex = directIndex;
-                }
-                else
-                {
-                    return true;
-                }
-                
-                // Get CircuitHousing and device
+                // Get CircuitHousing
                 var circuitHousing = chip.ParentSlot?.Parent as CircuitHousing;
                 if (circuitHousing == null)
                     return true;
                 
-                var device = circuitHousing.GetLogicableFromIndex(devIndex);                
+                // Get device using the new IDeviceVariable interface
+                var getDeviceMethod = deviceRef.GetType().GetMethod("GetDevice", BindingFlags.Public | BindingFlags.Instance);
+                if (getDeviceMethod == null)
+                    return true;
+                
+                var device = getDeviceMethod.Invoke(deviceRef, new object[] { circuitHousing }) as ILogicable;
+                if (device == null)
+                    return true;
+                
+                // Get device index for substitution system
+                int devIndex = GetDeviceIndex(deviceRef, chip, circuitHousing, device);
                 
                 // Check if it's a LogicTransmitter in passive mode
                 if (device is LogicTransmitter transmitter && !transmitter.IsActiveTransmitter)
@@ -116,6 +80,91 @@ namespace spuhudmod
             {
                 return true;
             }
+        }
+        
+        // Helper method to get device index from various device variable types
+        private static int GetDeviceIndex(object deviceRef, ProgrammableChip chip, CircuitHousing circuitHousing, ILogicable device)
+        {
+            try
+            {
+                var deviceRefType = deviceRef.GetType();
+                
+                // For DirectDeviceVariable
+                if (deviceRefType.Name == "DirectDeviceVariable")
+                {
+                    var getVariableValueMethod = deviceRefType.GetMethod("GetVariableValue", BindingFlags.Public | BindingFlags.Instance);
+                    if (getVariableValueMethod != null)
+                    {
+                        // Get the AliasTarget.Register enum value
+                        var aliasTargetType = typeof(ProgrammableChip).GetNestedType("_AliasTarget", BindingFlags.NonPublic);
+                        if (aliasTargetType != null)
+                        {
+                            var registerValue = Enum.Parse(aliasTargetType, "Register");
+                            var deviceId = (int)getVariableValueMethod.Invoke(deviceRef, new object[] { registerValue });
+                            // Find device index by ID
+                            return FindDeviceIndexById(circuitHousing, deviceId);
+                        }
+                    }
+                }
+                
+                // For DeviceAliasVariable or DeviceIndexVariable
+                var getVariableIndexMethod = deviceRefType.GetMethod("GetVariableIndex", BindingFlags.Public | BindingFlags.Instance);
+                if (getVariableIndexMethod != null)
+                {
+                    var aliasTargetType = typeof(ProgrammableChip).GetNestedType("_AliasTarget", BindingFlags.NonPublic);
+                    if (aliasTargetType != null)
+                    {
+                        var deviceValue = Enum.Parse(aliasTargetType, "Device");
+                        var deviceIndex = (int)getVariableIndexMethod.Invoke(deviceRef, new object[] { deviceValue, false });
+                        return deviceIndex;
+                    }
+                }
+                
+                // Fallback: search by device reference
+                return FindDeviceIndexByReference(circuitHousing, device);
+            }
+            catch
+            {
+                // Fallback: search by device reference
+                return FindDeviceIndexByReference(circuitHousing, device);
+            }
+        }
+        
+        // Helper method to find device index by ID
+        private static int FindDeviceIndexById(CircuitHousing circuitHousing, int deviceId)
+        {
+            try
+            {
+                var device = circuitHousing.GetLogicableFromId(deviceId);
+                if (device != null)
+                {
+                    // Find which slot this device is in
+                    for (int slot = 0; slot < 6; slot++)
+                    {
+                        var slotDevice = circuitHousing.GetLogicableFromIndex(slot);
+                        if (slotDevice == device)
+                            return slot;
+                    }
+                }
+            }
+            catch { }
+            return 0; // Default to slot 0
+        }
+        
+        // Helper method to find device index by reference
+        private static int FindDeviceIndexByReference(CircuitHousing circuitHousing, ILogicable device)
+        {
+            try
+            {
+                for (int i = 0; i < 6; i++) // Stationeers has max 6 device slots
+                {
+                    var slotDevice = circuitHousing.GetLogicableFromIndex(i);
+                    if (slotDevice == device)
+                        return i;
+                }
+            }
+            catch { }
+            return 0; // Default to slot 0
         }
         
         // Public methods to manage device substitutions
